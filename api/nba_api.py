@@ -1,7 +1,7 @@
 import httpx
 from datetime import date, timedelta, datetime
 from config import NBA_API_KEY
-from nba_api.stats.static import teams, players
+from nba_api.stats.static import teams
 from nba_api.stats.endpoints import commonteamroster
 import asyncio
 
@@ -11,10 +11,10 @@ HEADERS = {"Authorization": NBA_API_KEY}
 # Кэш ID команд и матчей
 _TEAM_ID_CACHE = {}
 _GAMES_CACHE = {}
-
+_TEAM_ROSTER_CACHE = {}
 
 async def get_team_id(team_full_name: str, default_id=None):
-    """Получаем ID команды по имени с fallback на default_id"""
+    #Получаем ID команды по имени с fallback на default_id
     if team_full_name in _TEAM_ID_CACHE:
         return _TEAM_ID_CACHE[team_full_name], None
 
@@ -160,7 +160,18 @@ def format_game_result(game, team_id):
     location = "H" if is_home else "A"  # H = Home, A = Away
     return f"{date_str} | {location} | {result} {team_score}-{opponent_score} vs {opponent}"
 
-async def get_team_roster(team_name: str):
+
+async def get_team_roster(team_name: str, cache_timeout=600):
+    #Возвращает список игроков и тренеров команды с кэшированием.
+    #cache_timeout — время жизни кэша в секундах (по умолчанию 10 минут)
+    now = datetime.now()
+
+    # проверка кэша
+    if team_name in _TEAM_ROSTER_CACHE:
+        data, timestamp = _TEAM_ROSTER_CACHE[team_name]
+        if (now - timestamp).total_seconds() < cache_timeout:
+            return data
+
     try:
         team_info = [t for t in teams.get_teams() if t['full_name'] == team_name]
         if not team_info:
@@ -172,30 +183,31 @@ async def get_team_roster(team_name: str):
         coaches_list = roster_data['resultSets'][1]['rowSet']  # Тренеры
 
         players_list = [format_player(p) for p in roster_list]
+        coaches_list_formatted = [f"{c[5]} - {c[7]}" for c in coaches_list]
 
-        # c = ['TEAM_ID', 'SEASON', 'COACH_ID', 'FIRST_NAME', 'LAST_NAME', 'COACH_NAME', 'IS_ASSISTANT', 'COACH_TYPE', 'SORT_SEQUENCE']
-        coaches_list_formatted = [f"{c[5]} - {c[7]}" for c in coaches_list] # Имя Фамилия - роль
+        result = (players_list, coaches_list_formatted, None)
 
-        return players_list, coaches_list_formatted, None
+        # сохраняем в кэш
+        _TEAM_ROSTER_CACHE[team_name] = (result, now)
+        return result
 
     except Exception as e:
         return [], [], f"Ошибка при получении данных: {e}"
 
 
 def format_team_roster(players, coaches):
-    """
-    Формирует компактный текст для бота с игроками и тренерами
-    """
-    text = "🏀 Состав команды:\n\n"
+    #Формирует компактный текст для бота с игроками и тренерами
+
+    text = ""
     if players:
-        text += "Игроки:\n" + "\n".join(players) + "\n\n"
+        text += "<b>Игроки</b>:\n" + "\n".join(players) + "\n\n"
     else:
-        text += "Игроки: нет данных\n\n"
+        text += "<b>Игроки</b>: нет данных\n\n"
 
     if coaches:
-        text += "Тренерский штаб:\n" + "\n".join(coaches)
+        text += "<b>Тренерский штаб</b>:\n" + "\n".join(coaches)
     else:
-        text += "Тренерский штаб: нет данных"
+        text += "<b>Тренерский штаб</b>: нет данных"
 
     return text
 
@@ -208,7 +220,7 @@ def format_player(p):
     height = convert_height_to_meters(p[8])
     weight = convert_weight_to_kg(p[9])
     age = int(p[11]) if p[11] else "N/A"
-    return f"{name} | #{jersey} | {position} | {height}, {weight} | {age} лет"
+    return f"<i>{name}</i> | #{jersey} | {position} | {height}, {weight} | {age} лет"
 
 def convert_height_to_meters(height_str):
     try:
